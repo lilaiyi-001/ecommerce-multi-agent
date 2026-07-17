@@ -1,7 +1,14 @@
 ﻿<script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { PieChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { useAnalysisStore } from '../stores/analysis.js'
+
+use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const store = useAnalysisStore()
 const router = useRouter()
@@ -19,6 +26,25 @@ const statCards = computed(() => [
   { label: '商品总数', value: store.productCount, color: '#9c27b0' },
 ])
 
+const ringOption = computed(() => {
+  const data = store.categoryStats.length
+    ? store.categoryStats.map(c => ({ name: c.name, value: c.product_count }))
+    : categories.map(c => ({ name: c, value: 10 }))
+  return {
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 件 ({d}%)' },
+    legend: { bottom: 0, textStyle: { fontSize: 12 } },
+    series: [{
+      type: 'pie',
+      radius: ['45%', '75%'],
+      center: ['50%', '42%'],
+      data,
+      label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+      emphasis: { label: { fontSize: 16, fontWeight: 'bold' } },
+    }],
+  }
+})
+
 function goChat(cat) {
   router.push('/chat')
   setTimeout(() => {
@@ -33,6 +59,7 @@ function goChat(cat) {
 
 onMounted(() => {
   store.checkHealth()
+  store.fetchCategoryStats()
 })
 </script>
 
@@ -51,19 +78,25 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Recent Analyses -->
-    <div class="card" style="margin-bottom:24px">
-      <div class="card-title" style="margin-bottom:12px">最近分析记录</div>
-      <div v-if="store.recentAnalyses.length === 0" style="text-align:center;padding:20px;color:#888">
-        暂无记录，去 <router-link to="/chat" style="color:#2196f3">智能对话</router-link> 开始分析
+    <!-- Ring Chart + Recent Analyses -->
+    <div class="grid-2" style="margin-bottom:24px">
+      <div class="card">
+        <div class="card-title">类目商品分布</div>
+        <v-chart :option="ringOption" style="height:320px" autoresize />
       </div>
-      <div v-else style="display:flex;flex-direction:column;gap:8px">
-        <div v-for="(r, i) in store.recentAnalyses" :key="i"
-          style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#f9f9f9;border-radius:6px;font-size:13px">
-          <span style="flex:1;color:#333">{{ r.message }}</span>
-          <span class="tag tag-info">{{ r.category }}</span>
-          <span style="color:#888;font-size:12px">{{ r.completed }}/{{ r.tasks }} 完成</span>
-          <span style="color:#aaa;font-size:11px">{{ r.time }}</span>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">最近分析记录</div>
+        <div v-if="store.recentAnalyses.length === 0" style="text-align:center;padding:20px;color:#888">
+          暂无记录，去 <router-link to="/chat" style="color:#2196f3">智能对话</router-link> 开始分析
+        </div>
+        <div v-else style="display:flex;flex-direction:column;gap:8px">
+          <div v-for="(r, i) in store.recentAnalyses" :key="i"
+            style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#f9f9f9;border-radius:6px;font-size:13px">
+            <span style="flex:1;color:#333">{{ r.message }}</span>
+            <span class="tag tag-info">{{ r.category }}</span>
+            <span style="color:#888;font-size:12px">{{ r.completed }}/{{ r.tasks }} 完成</span>
+            <span style="color:#aaa;font-size:11px">{{ r.time }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -81,6 +114,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
 .grid-4 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -112,6 +150,7 @@ onMounted(() => {
   transform: translateY(-2px);
 }
 @media (max-width: 768px) {
+  .grid-2 { grid-template-columns: 1fr; }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

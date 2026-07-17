@@ -18,6 +18,7 @@ from app.api.copy import router as copy_router
 from app.api.inventory import router as inventory_router
 from app.api.promotion import router as promotion_router
 from app.api.auth import router as auth_router
+from app.api.categories import router as categories_router
 from app.agents import register_all_agents
 
 
@@ -83,6 +84,7 @@ app.include_router(copy_router)
 app.include_router(inventory_router)
 app.include_router(promotion_router)
 app.include_router(auth_router)
+app.include_router(categories_router)
 
 
 @app.get("/")

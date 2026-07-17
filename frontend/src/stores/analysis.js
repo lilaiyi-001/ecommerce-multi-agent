@@ -20,6 +20,7 @@ export const useAnalysisStore = defineStore('analysis', {
     intent: null, selection: null, trend: null, competitor: null,
     profile: null, pricing: null, copy: null, inventory: null, promotion: null,
     loading: false, error: null, systemStatus: null, recentAnalyses: loadRecent(),
+    categoryStats: [],
   }),
   getters: {
     productCount: (state) => state.selection?.total_products || 0,
@@ -74,6 +75,12 @@ export const useAnalysisStore = defineStore('analysis', {
     async analyzeInventory(productId, product, category) {
       const res = await api.analyzeInventory(productId, product, category)
       this.inventory = res.data; return res.data
+    },
+    async fetchCategoryStats() {
+      try {
+        const res = await api.getCategoryStats()
+        this.categoryStats = res.data?.categories || []
+      } catch { this.categoryStats = [] }
     },
     async createPromotionPlan(products) {
       const res = await api.createPromotionPlan(products)

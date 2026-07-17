@@ -79,7 +79,7 @@ export function forecastTrend(productIds, category) {
 export function analyzeCompetitor(productId, category) {
   return api.post('/competitor/analyze', {
     target_product_id: productId,
-    category: category || "electronics",
+    category: category || "",
   })
 }
 
@@ -111,6 +111,10 @@ export function analyzeInventory(productId, product, category) {
 
 export function createPromotionPlan(products) {
   return api.post('/promotion/plan', { recommended_products: products || [] })
+}
+
+export function getCategoryStats() {
+  return api.get("/categories")
 }
 
 export default api
