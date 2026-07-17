@@ -1,28 +1,27 @@
-ï»¿# ============================================
-# ç”µå•†é€‰å“2 â€” åç«¯ Dockerfile
+# ============================================
+# µçÉÌÑ¡Æ·2 ¡ª ºó¶Ë Dockerfile
 # ============================================
 FROM python:3.9-slim AS backend
 
 WORKDIR /app
 
-# ç³»ç»Ÿä¾èµ–
+# ÏµÍ³ÒÀÀµ
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Python ä¾èµ–
+# Python ÒÀÀµ
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# æºç 
+# Ô´Âë
 COPY backend/ .
 
-# Python è·¯å¾„ï¼ˆlib ç›®å½•åŒ…å«æœ¬åœ°å®‰è£…çš„ç¬¬ä¸‰æ–¹åŒ…ï¼‰
-ENV PYTHONPATH=/app/lib
+# Python Â·¾¶£¨lib Ä¿Â¼°üº¬±¾µØ°²×°µÄµÚÈı·½°ü£©
 
 EXPOSE 8085
 
-# å¥åº·æ£€æŸ¥
+# ½¡¿µ¼ì²é
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8085/health || exit 1
 
