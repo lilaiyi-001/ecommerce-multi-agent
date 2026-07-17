@@ -1,0 +1,29 @@
+﻿# ============================================
+# 电商选品2 — 后端 Dockerfile
+# ============================================
+FROM python:3.9-slim AS backend
+
+WORKDIR /app
+
+# 系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 依赖
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 源码
+COPY backend/ .
+
+# Python 路径（lib 目录包含本地安装的第三方包）
+ENV PYTHONPATH=/app/lib
+
+EXPOSE 8085
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8085/health || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8085"]

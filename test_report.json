@@ -1,0 +1,74 @@
+{
+  "results": {
+    "passed": 13,
+    "failed": 0,
+    "tests": [
+      {
+        "name": "GET /",
+        "ok": true,
+        "detail": "{'status': 'ok', 'service': '电商选品运营多智能体系统', 'version': '0.1.0'}"
+      },
+      {
+        "name": "GET /health",
+        "ok": true,
+        "detail": "{'status': 'healthy'}"
+      },
+      {
+        "name": "完整分析",
+        "ok": true,
+        "detail": "意图=product_analysis 置信度=85% 类目=electronics"
+      },
+      {
+        "name": "模糊查询",
+        "ok": true,
+        "detail": "意图=general_query 置信度=50% 类目=-"
+      },
+      {
+        "name": "趋势预测",
+        "ok": true,
+        "detail": "意图=trend_query 置信度=85% 类目=clothing"
+      },
+      {
+        "name": "只说类目",
+        "ok": true,
+        "detail": "意图=product_analysis 置信度=70% 类目=jewelry"
+      },
+      {
+        "name": "定价咨询",
+        "ok": true,
+        "detail": "意图=pricing_advice 置信度=85% 类目=jewelry"
+      },
+      {
+        "name": "补货咨询",
+        "ok": true,
+        "detail": "意图=inventory_advice 置信度=85% 类目=electronics"
+      },
+      {
+        "name": "编排任务计划",
+        "ok": true,
+        "detail": "阶段=3 任务数=2"
+      },
+      {
+        "name": "报告生成",
+        "ok": true,
+        "detail": "摘要=任务计划：共 2 个子任务 | 已完成：0 | 已跳过：2 | 待完成：0"
+      },
+      {
+        "name": "全流程-意图识别",
+        "ok": true,
+        "detail": "意图=product_analysis 类目=electronics"
+      },
+      {
+        "name": "全流程-任务计划",
+        "ok": true,
+        "detail": "阶段=3 任务数=8"
+      },
+      {
+        "name": "全流程-报告生成",
+        "ok": true,
+        "detail": "摘要=任务计划：共 8 个子任务 | 已完成：0 | 已跳过：8 | 待完成：0"
+      }
+    ]
+  },
+  "timestamp": "2026-07-15 19:29:08"
+}
