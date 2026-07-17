@@ -29,7 +29,6 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
         env:
-          PYTHONPATH: ${{ github.workspace }}/backend/lib
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           AUTH_USERNAME: admin
