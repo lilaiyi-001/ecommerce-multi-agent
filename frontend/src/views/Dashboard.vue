@@ -29,7 +29,7 @@ const statCards = computed(() => [
 const ringOption = computed(() => {
   const data = store.categoryStats.length
     ? store.categoryStats.map(c => ({ name: c.name, value: c.product_count }))
-    : categories.map(c => ({ name: c, value: 10 }))
+    : categories.map(c => ({ name: c, value: 5 }))
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} 件 ({d}%)' },
     legend: { bottom: 0, textStyle: { fontSize: 12 } },
@@ -45,16 +45,8 @@ const ringOption = computed(() => {
   }
 })
 
-function goChat(cat) {
-  router.push('/chat')
-  setTimeout(() => {
-    const input = document.querySelector('textarea')
-    if (input) {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
-      nativeInputValueSetter.call(input, `分析${cat}类目，推荐3个爆款`)
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    }
-  }, 100)
+function goReport() {
+  router.push('/report')
 }
 
 onMounted(() => {
@@ -67,10 +59,9 @@ onMounted(() => {
   <div>
     <div style="margin-bottom:24px">
       <h2 style="font-size:22px;font-weight:700;color:#1a1a2e">电商选品运营多智能体系统</h2>
-      <p style="color:#666;margin-top:6px">基于 10 个专业智能体协作，自动化完成选品分析的完整流程</p>
+      <p style="color:#666;margin-top:6px">基于多个专业智能体协作，自动化完成选品分析的完整流程</p>
     </div>
 
-    <!-- Stat Cards -->
     <div class="grid-4" style="margin-bottom:24px">
       <div v-for="card in statCards" :key="card.label" class="card stat-card">
         <div class="card-title">{{ card.label }}</div>
@@ -78,7 +69,6 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Ring Chart + Recent Analyses -->
     <div class="grid-2" style="margin-bottom:24px">
       <div class="card">
         <div class="card-title">类目商品分布</div>
@@ -87,7 +77,7 @@ onMounted(() => {
       <div class="card">
         <div class="card-title" style="margin-bottom:12px">最近分析记录</div>
         <div v-if="store.recentAnalyses.length === 0" style="text-align:center;padding:20px;color:#888">
-          暂无记录，去 <router-link to="/chat" style="color:#2196f3">智能对话</router-link> 开始分析
+          暂无记录，去 <router-link to="/report" style="color:#2196f3">生成报告</router-link> 开始分析
         </div>
         <div v-else style="display:flex;flex-direction:column;gap:8px">
           <div v-for="(r, i) in store.recentAnalyses" :key="i"
@@ -101,12 +91,11 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Category Quick Entry -->
     <div class="card">
-      <div class="card-title" style="margin-bottom:12px">快捷类目入口</div>
-      <div class="grid-4">
-        <button v-for="cat in categories" :key="cat" class="cat-btn" @click="goChat(cat)">
-          {{ cat }}
+      <div class="card-title" style="margin-bottom:12px">快捷入口</div>
+      <div style="text-align:center;padding:20px">
+        <button class="cat-btn primary" @click="goReport" style="font-size:16px;padding:16px 48px">
+          📊 立即生成分析报告
         </button>
       </div>
     </div>
@@ -114,41 +103,20 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.grid-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.grid-4 {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-.stat-card {
-  text-align: center;
-  padding: 20px 16px;
-}
-.stat-card .stat-value {
-  font-size: 28px;
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat-card { text-align: center; padding: 20px 16px; }
+.stat-card .stat-value { font-size: 28px; font-weight: 700; margin-top: 8px; }
+.cat-btn.primary {
+  background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+  border: none;
+  color: #fff;
+  border-radius: 10px;
   font-weight: 700;
-  margin-top: 8px;
-}
-.cat-btn {
-  background: #f0f4ff;
-  border: 1px solid #c5d3f0;
-  color: #3f51b5;
-  padding: 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
-.cat-btn:hover {
-  background: #e3ecff;
-  border-color: #3f51b5;
-  transform: translateY(-2px);
-}
+.cat-btn.primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(79,195,247,0.4); }
 @media (max-width: 768px) {
   .grid-2 { grid-template-columns: 1fr; }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }

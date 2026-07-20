@@ -122,3 +122,35 @@ export default api
 export function getHealth() {
   return axios.get('/health')
 }
+
+// === 产品列表 ===
+export function getProducts(category = '') {
+  const params = category ? { category } : {}
+  return api.get('/products', { params })
+}
+
+// === 报告相关 ===
+export function generateReport(productIds, activityType, sessionId) {
+  return api.post('/reports/generate', { timeout: 120000,
+    product_ids: productIds,
+    activity_type: activityType,
+    session_id: sessionId || 'sess_' + Date.now(),
+  })
+}
+
+export function getReportHistory(skip = 0, limit = 20) {
+  return api.get('/reports/history', { params: { skip, limit } })
+}
+
+export function getReportDetail(reportId) {
+  return api.get(/reports/)
+}
+
+// === 报告追问 ===
+export function chatFollowup(reportId, userMessage, conversationHistory) {
+  return api.post(/reports//chat, {
+    user_message: userMessage,
+    conversation_history: conversationHistory || [],
+  })
+}
+

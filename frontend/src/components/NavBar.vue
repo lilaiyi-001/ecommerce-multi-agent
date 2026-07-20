@@ -7,15 +7,7 @@ const router = useRouter()
 
 const navItems = [
   { path: '/', name: 'Dashboard', icon: '📊', label: '概览' },
-  { path: '/chat', name: 'Chat', icon: '💬', label: '智能对话' },
-  { path: '/selection', name: 'Selection', icon: '🏆', label: '选品分析' },
-  { path: '/trend', name: 'Trend', icon: '📈', label: '趋势预测' },
-  { path: '/competitor', name: 'Competitor', icon: '🔍', label: '竞品分析' },
-  { path: '/profile', name: 'Profile', icon: '👤', label: '用户画像' },
-  { path: '/pricing', name: 'Pricing', icon: '💰', label: '定价策略' },
-  { path: '/copy', name: 'Copy', icon: '✍️', label: '营销文案' },
-  { path: '/inventory', name: 'Inventory', icon: '📦', label: '补货/清仓' },
-  { path: '/promotion', name: 'Promotion', icon: '🎉', label: '活动策划' },
+  { path: '/report', name: 'ReportGenerator', icon: '📋', label: '生成报告' },
 ]
 
 function handleLogout() {
