@@ -218,7 +218,7 @@ watch(categoryFilter, () => { loadProducts() })
         </div>
 
         <button class="btn-generate" :disabled="!canGenerate" @click="doGenerate">
-          {{ generating ? '⏳ 智能体协作中...' : 🚀 生成报告（ 个商品） }}
+          {{ generating ? '⏳ 智能体协作中...' : '🚀 生成报告（' + selectedIds.length + ' 个商品）' }}
         </button>
         <div v-if="error" class="error-msg">{{ error }}</div>
       </div>

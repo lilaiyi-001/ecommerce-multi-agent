@@ -1,8 +1,7 @@
-﻿import axios from 'axios'
+import axios from 'axios'
 
 const TOKEN_KEY = 'ecommerce_token'
 
-// Token 工具函数
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
@@ -25,7 +24,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// 请求拦截器：自动注入 Authorization header
 api.interceptors.request.use(
   (config) => {
     const token = getToken()
@@ -37,13 +35,11 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// 响应拦截器：401 时清 token，触发登录跳转
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
       clearToken()
-      // 如果不在登录页，跳转到登录页
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }
@@ -52,90 +48,25 @@ api.interceptors.response.use(
   }
 )
 
-export function recognizeIntent(userMessage, sessionId) {
-  return api.post('/intent/recognize', {
-    user_message: userMessage,
-    session_id: sessionId || 'sess_' + Date.now(),
-    turn_number: 1,
-  })
-}
-
-export function chatWithAgent(userMessage, sessionId) {
-  return api.post('/chat', {
-    user_message: userMessage,
-    session_id: sessionId || 'sess_' + Date.now(),
-    turn_number: 1,
-  })
-}
-
-export function analyzeSelection(category, topN) {
-  return api.post('/selection/analyze', { category, top_n: topN || 5 })
-}
-
-export function forecastTrend(productIds, category) {
-  return api.post('/trend/forecast', { product_ids: productIds || [], category })
-}
-
-export function analyzeCompetitor(productId, category) {
-  return api.post('/competitor/analyze', {
-    target_product_id: productId,
-    category: category || "",
-  })
-}
-
-export function analyzeProfile(category) {
-  return api.post('/profile/analyze', { category })
-}
-
-export function analyzePricing(productId, product, category) {
-  return api.post('/pricing/analyze', {
-    product_id: productId,
-    product: { ...product, category: category || product.category },
-  })
-}
-
-export function generateCopy(productId, product, pricingInfo, category) {
-  return api.post('/copy/generate', {
-    product_id: productId,
-    product: { ...product, category: category || product.category },
-    pricing_info: pricingInfo || {},
-  })
-}
-
-export function analyzeInventory(productId, product, category) {
-  return api.post('/inventory/analyze', {
-    product_id: productId,
-    product: { ...product, category: category || product.category },
-  })
-}
-
-export function createPromotionPlan(products) {
-  return api.post('/promotion/plan', { recommended_products: products || [] })
-}
-
-export function getCategoryStats() {
-  return api.get("/categories")
-}
-
-export default api
-// Add raw GET for health check
 export function getHealth() {
   return axios.get('/health')
 }
 
-// === 产品列表 ===
+export function getCategoryStats() {
+  return api.get('/categories')
+}
+
 export function getProducts(category = '') {
   const params = category ? { category } : {}
   return api.get('/products', { params })
 }
 
-// === 报告相关 ===
 export function generateReport(productIds, activityType, sessionId) {
-  return api.post('/reports/generate', { timeout: 120000,
+  return api.post('/reports/generate', {
     product_ids: productIds,
     activity_type: activityType,
     session_id: sessionId || 'sess_' + Date.now(),
-  })
+  }, { timeout: 120000 })
 }
 
 export function getReportHistory(skip = 0, limit = 20) {
@@ -143,14 +74,14 @@ export function getReportHistory(skip = 0, limit = 20) {
 }
 
 export function getReportDetail(reportId) {
-  return api.get(/reports/)
+  return api.get(`/reports/${reportId}`)
 }
 
-// === 报告追问 ===
 export function chatFollowup(reportId, userMessage, conversationHistory) {
-  return api.post(/reports//chat, {
+  return api.post(`/reports/${reportId}/chat`, {
     user_message: userMessage,
     conversation_history: conversationHistory || [],
   })
 }
 
+export default api
