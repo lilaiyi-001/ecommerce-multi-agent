@@ -246,23 +246,57 @@ def execute_phase(phase, tasks, prev_results, session_id=""):
     return phase_result
 
 def _llm_generate_report(task_plan: dict, phase_results_raw: list) -> str:
-    """用 LLM 生成报告摘要，降级到模板拼接"""
+    """LLM generate professional Markdown report."""
     try:
-        prompt = (f"任务计划：{task_plan}\n\n各阶段结果：{phase_results_raw}\n\n请用一段话总结分析结果，突出关键发现和建议。")
-        result = chat_completion("你是一个电商选品系统的报告摘要助手。输出简洁的中文摘要。", prompt, temperature=0.3, max_tokens=512)
-        return result.strip()
+        agent_outputs = []
+        for phase in phase_results_raw:
+            for agent in phase.get("agents", []):
+                if agent.get("status") == "completed":
+                    agent_outputs.append({
+                        "agent": agent.get("task_type","?"),
+                        "label": agent.get("task_label","?"),
+                        "summary": agent.get("summary","")[:500],
+                    })
+        ctx = json.dumps(agent_outputs, ensure_ascii=False, indent=2)
+        prompt_lines = [
+            "你是电商选品分析报告撰写专家。根据以下多智能体分析结果，撰写完整选品分析报告。",
+            "智能体结果：" + ctx,
+            "按以下Markdown结构输出：",
+            "## 执行摘要（2-3句核心发现）",
+            "## 选品推荐（Top商品+理由+爆款指数）",
+            "## 市场对比分析（价格/评分/销量 vs 市场）",
+            "## 定价建议（最优区间+折扣空间）",
+            "## 营销文案（各商品推广文案）",
+            "## 活动策划方案（主题/目标/组合/节奏）",
+            "## 风险提示与补货建议",
+            "要求：引用数据、建议可落地、禁止编造。",
+        ]
+        prompt = chr(10).join(prompt_lines)
+        result = chat_completion(
+            "你是电商分析报告专家。输出专业翔实的Markdown报告。",
+            prompt, temperature=0.3, max_tokens=4096)
+        if result and len(result.strip()) > 100:
+            return result.strip()
     except Exception as e:
-        logger.warning(f"LLM 报告摘要失败，使用模板: {e}")
-        total = sum(len(p.get("agents", [])) for p in phase_results_raw)
-        completed = sum(1 for p in phase_results_raw for a in p.get("agents", []) if a.get("status") == "completed")
-        skipped = sum(1 for p in phase_results_raw for a in p.get("agents", []) if a.get("status") == "skipped")
-        category = task_plan.get("category", "?") if isinstance(task_plan, dict) else "?"
-        return f"分析类目「{category}」完成 {completed}/{total} 个任务（跳过 {skipped} 个）。"
+        logger.warning("LLM报告失败: %s", e)
+
+    # 降级模板
+    parts = []
+    total = completed = skipped = 0
+    for phase in phase_results_raw:
+        for agent in phase.get("agents", []):
+            total += 1
+            if agent.get("status")=="completed": completed+=1
+            elif agent.get("status")=="skipped": skipped+=1
+            label = agent.get("task_label","?")
+            summary = agent.get("summary","")
+            if summary: parts.append("### "+label+"\n\n"+str(summary)[:1000]+"\n")
+    return "## 执行摘要\n\n共"+str(total)+"个任务，完成"+str(completed)+"个。\n\n"+"\n".join(parts)
 
 
 def generate_report(task_plan: TaskPlan, phase_results: list[PhaseResult]) -> dict:
-    """汇总所有结果生成最终报告"""
-    sections, summary_parts = {}, []
+    """汇总所有结果生成最终报告（v0.4：LLM驱动+模板降级）"""
+    sections = {}
     total = completed = skipped = 0
     for phase in phase_results:
         for ar in phase.agents:
@@ -271,22 +305,24 @@ def generate_report(task_plan: TaskPlan, phase_results: list[PhaseResult]) -> di
             elif ar.status == "skipped": skipped += 1
             sections[ar.task_type] = {"label": ar.task_label, "status": ar.status, "summary": ar.summary}
 
-    plan_raw = task_plan.model_dump() if hasattr(task_plan, 'model_dump') else task_plan
-    phases_raw = [p.model_dump() if hasattr(p, 'model_dump') else p for p in phase_results]
-    llm_summary = _llm_generate_report(plan_raw, phases_raw)
-    if llm_summary: summary_parts.append(llm_summary)
-    summary_parts.append(f"任务计划：共 {total} 个子任务")
-    summary_parts.append(f"已完成：{completed}")
-    summary_parts.append(f"已跳过：{skipped}")
+    plan_raw = task_plan.model_dump() if hasattr(task_plan,"model_dump") else task_plan
+    phases_raw = [p.model_dump() if hasattr(p,"model_dump") else p for p in phase_results]
+    markdown = _llm_generate_report(plan_raw, phases_raw)
+
+    summary = "共"+str(total)+"个任务，完成"+str(completed)+"个"
+    if markdown and "执行摘要" in markdown:
+        idx = markdown.find("执行摘要")
+        end_idx = markdown.find("##", idx+10)
+        exec_text = markdown[idx:(end_idx if end_idx>0 else idx+300)]
+        summary = exec_text.replace("## ","").replace("\n"," ")[:200]
 
     return {
-        "report_id": f"rpt_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
+        "report_id": "rpt_"+datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "category": task_plan.category, "top_n": task_plan.top_n,
         "total_tasks": total, "completed_tasks": completed, "skipped_tasks": skipped,
-        "sections": sections, "summary": " | ".join(summary_parts),
+        "sections": sections, "summary": summary, "markdown_report": markdown,
     }
-
 
 def orchestrate(input_data: OrchestratorInput) -> OrchestratorOutput:
     """主控智能体主入口"""

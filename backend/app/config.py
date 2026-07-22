@@ -133,6 +133,48 @@ class Settings:
     @property
     def LOG_BACKUP_COUNT(self) -> int:
         return int(os.getenv("LOG_BACKUP_COUNT", "5"))
+    # ═══════ 飞书库存表格配置 ═══════
+    @property
+    def FEISHU_INVENTORY_APP_ID(self) -> str:
+        return os.getenv("FEISHU_INVENTORY_APP_ID", "")
+
+    @property
+    def FEISHU_INVENTORY_APP_SECRET(self) -> str:
+        return os.getenv("FEISHU_INVENTORY_APP_SECRET", "")
+
+    @property
+    def FEISHU_INVENTORY_BITABLE_APP_TOKEN(self) -> str:
+        return os.getenv("FEISHU_INVENTORY_BITABLE_APP_TOKEN", "")
+
+    @property
+    def FEISHU_INVENTORY_TABLE_ID(self) -> str:
+        return os.getenv("FEISHU_INVENTORY_TABLE_ID", "")
+
+    @property
+    def FEISHU_INVENTORY_VIEW_ID(self) -> str:
+        return os.getenv("FEISHU_INVENTORY_VIEW_ID", "")
+
+    # ═══════ 飞书爬取商品数据表格配置 ═══════
+    @property
+    def FEISHU_CRAWLED_APP_ID(self) -> str:
+        return os.getenv("FEISHU_CRAWLED_APP_ID", "")
+
+    @property
+    def FEISHU_CRAWLED_APP_SECRET(self) -> str:
+        return os.getenv("FEISHU_CRAWLED_APP_SECRET", "")
+
+    @property
+    def FEISHU_CRAWLED_BITABLE_APP_TOKEN(self) -> str:
+        return os.getenv("FEISHU_CRAWLED_BITABLE_APP_TOKEN", "")
+
+    @property
+    def FEISHU_CRAWLED_TABLE_ID(self) -> str:
+        return os.getenv("FEISHU_CRAWLED_TABLE_ID", "")
+
+    @property
+    def FEISHU_CRAWLED_VIEW_ID(self) -> str:
+        return os.getenv("FEISHU_CRAWLED_VIEW_ID", "")
+
 
 settings = Settings()
 os.environ.setdefault("OPENAI_API_KEY", settings.MINIMAX_API_KEY)

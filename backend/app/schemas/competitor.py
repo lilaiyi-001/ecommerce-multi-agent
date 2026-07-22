@@ -1,3 +1,4 @@
+"""竞品分析智能体数据模型"""
 from __future__ import annotations
 from typing import Optional, Any
 from pydantic import BaseModel, Field
@@ -23,11 +24,10 @@ class CompetitionAssessment(BaseModel):
 
 
 class CompetitorInput(BaseModel):
-    target_product_id: int = Field(0, description="目标商品ID（0=自动选择）")
+    target_product_id: int = Field(0, description="目标商品ID")
     target_product: dict = Field(default_factory=dict, description="目标商品信息")
     category_products: list[dict] = Field(default_factory=list, description="同类目商品列表")
-    category_sales_data: dict = Field(default_factory=dict, description="类目销量数据")
-    category: str = Field("electronics", description="类目")
+    category: str = Field("", description="类目")
     context: dict = Field(default_factory=dict, description="上下文")
 
 
@@ -36,6 +36,9 @@ class CompetitorOutput(BaseModel):
     target_product_id: int = Field(..., description="目标商品ID")
     target_product_title: str = Field("", description="目标商品标题")
     competitors: list[CompetitorInfo] = Field(default_factory=list, description="竞品列表")
-    competition_assessment: CompetitionAssessment = Field(default_factory=CompetitionAssessment, description="竞争力评估")
+    competition_assessment: CompetitionAssessment = Field(default_factory=CompetitionAssessment)
+    # --- 交叉对比增强 ---
+    comparison_table: list[dict] = Field(default_factory=list, description="逐商品 vs 市场均值对比表")
+    competitive_edge: str = Field("", description="差异化优势分析")
     for_downstream: dict = Field(default_factory=dict, description="给下游数据")
     for_display: str = Field("", description="展示文本")

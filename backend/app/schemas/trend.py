@@ -9,7 +9,7 @@ class AlgorithmInfo(BaseModel):
     selected_method: str = Field(..., description="选中的方法名称")
     reason: str = Field("", description="选择理由")
     weights: dict[str, float] = Field(default_factory=dict, description="各算法权重")
-    confidence: str = Field("中", description="置信度: 高/中/低")
+    confidence: str = Field("中", description="置信度 高/中/低")
 
 
 class DailyForecast(BaseModel):
@@ -25,10 +25,13 @@ class ProductTrend(BaseModel):
     historical_avg: float = Field(0.0, description="历史日均销量")
     trend_direction: str = Field("平稳", description="趋势方向: 上升/下降/平稳")
     algorithm_selection: AlgorithmInfo = Field(default_factory=AlgorithmInfo)
-    forecast_7d: dict = Field(default_factory=dict, description="未来7天预测 {daily: [...], total: N, avg_daily: N}")
+    forecast_7d: dict = Field(default_factory=dict, description="未来7天预测")
     forecast_30d_total: float = Field(0.0, description="30天总预测")
     forecast_30d_avg: float = Field(0.0, description="30天日均预测")
-    confidence: str = Field("中", description="置信度: 高/中/低")
+    confidence: str = Field("中", description="置信度 高/中/低")
+    # --- 库存关联指标 ---
+    sales_velocity: Optional[float] = Field(None, description="销售速度（日均出库量，来自库存表）")
+    trend_reason: str = Field("", description="LLM生成的趋势分析理由")
 
 
 class TrendInput(BaseModel):
@@ -42,6 +45,8 @@ class TrendInput(BaseModel):
 class TrendOutput(BaseModel):
     """趋势预测输出"""
     agent_name: str = Field(default="trend_forecast")
+    category: str = Field("", description="分析类目")
     forecasts: list[ProductTrend] = Field(default_factory=list, description="各商品的预测结果")
+    inventory_trend_summary: str = Field("", description="库存趋势摘要（来自库存表交叉数据）")
     for_downstream: dict = Field(default_factory=dict, description="给下游的数据")
     for_display: str = Field("", description="展示文本")

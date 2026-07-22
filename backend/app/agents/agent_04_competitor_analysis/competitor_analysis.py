@@ -1,18 +1,20 @@
-"""竞品分析智能体（Competitor Analysis）
+"""竞品分析智能体（Competitor Analysis）v0.3
 
-职责：给定一个商品，与同类目竞品对比价格/评分/销量，输出竞争力评估。
-数据来源：Agent 2 的分析结果（使用模拟数据演示）
-输入规范符合文档要求：接收 target_product、category_products、category_sales_data
+职责：目标商品与同品类竞品对比价格/评分/销量，输出竞争力评估。
+v0.3：注入爬取表市场数据，生成逐商品对比表 + 差异化优势分析。
 
-飞书权限：不可检索飞书  依赖 LLM：否（纯代码计算）
+飞书权限：✅ 可调飞书
+依赖 LLM：可选（差异化分析增强）
 """
 from __future__ import annotations
-from app.utils.llm_client import chat_completion
+import logging
 from app.schemas.competitor import (
     CompetitorInput, CompetitorOutput, CompetitorInfo, CompetitionAssessment,
 )
 from app.services.data_generator import get_demo_products
 from app.services.feishu_data import get_feishu_products
+
+logger = logging.getLogger(__name__)
 
 
 def _price_score(target_price: float, min_p: float, max_p: float) -> float:
@@ -38,12 +40,10 @@ def _position(value: float, competitors: list[tuple], reverse: bool = False) -> 
         return "唯一商品"
     sorted_vals = sorted([c[0] for c in competitors], reverse=reverse)
     rank = 1
-    for i, v in enumerate(sorted_vals):
+    for v in sorted_vals:
         if (reverse and value >= v) or (not reverse and value <= v):
-            rank = i + 1
             break
-    else:
-        rank = len(sorted_vals) + 1
+        rank += 1
     total = len(sorted_vals) + 1
     pct = rank / total
     if rank == 1:
@@ -54,39 +54,41 @@ def _position(value: float, competitors: list[tuple], reverse: bool = False) -> 
         return "中等"
     elif pct <= 0.90:
         return "较低" if reverse else "较高"
-    else:
-        return "最低" if reverse else "最高"
+    return "最低" if reverse else "最高"
 
 
-def _llm_generate_assessment(target_title: str, score: float, strengths: list, weaknesses: list) -> str:
-    """用 LLM 生成竞争力评估文字，失败时用模板"""
-    from app.utils.llm_client import chat_completion
+def _llm_competitive_edge(target_title: str, comparison: list[dict]) -> str:
+    """LLM 生成差异化优势分析"""
+    if not comparison:
+        return ""
+    data = "\n".join(
+        f"- {c.get('title','')}: 售价{c.get('my_price','?')} vs 市场{c.get('market_avg_price','?')} | 评分{c.get('my_rating','?')} vs 市场{c.get('market_avg_rating','?')}"
+        for c in comparison[:5]
+    )
     try:
-        prompt = f"商品：{target_title}\n综合评分：{score}\n优势：{strengths}\n劣势：{weaknesses}\n请给出简洁的竞争力评估（50字以内）"
+        from app.utils.llm_client import chat_completion
         result = chat_completion(
-            "你是一个电商竞品分析助手。只基于提供的数据做评估，不要编造。",
-            prompt, temperature=0.3, max_tokens=200
+            "你是电商竞品分析师。基于对比数据，总结该商品的差异化优势和竞争策略。",
+            f"商品：{target_title}\n市场对比：\n{data}\n请用2-3句话总结差异化优势。",
+            temperature=0.3, max_tokens=300
         )
-        return result.strip()
-    except Exception:
+        return result.strip() if result else ""
+    except Exception as e:
+        logger.warning("LLM 竞品分析失败: %s", e)
         return ""
 
 
 def analyze_competitor(input_data: CompetitorInput) -> CompetitorOutput:
-    """竞品分析主入口"""
+    """竞品分析主入口（v0.3：注入爬取表交叉数据）"""
     target_id = input_data.target_product_id
     category = input_data.category
 
-    # 获取目标商品：优先使用文档标准输入中的 target_product，降级到从类目数据中查找
+    # 获取目标商品
     target = None
-
-    # product_id=0（未指定）时自动选择类目下第一个商品
     if target_id == 0:
-        fallback_products = (get_feishu_products(category) or get_demo_products(category)) if not input_data.category_products else list(input_data.category_products)
-        if fallback_products:
-            target_id = fallback_products[0]["product_id"]
-            if not input_data.category_products:
-                input_data.category_products = fallback_products
+        fallback = get_feishu_products(category) or get_demo_products(category)
+        if fallback:
+            target_id = fallback[0]["product_id"]
 
     if input_data.target_product and input_data.target_product.get("title"):
         target = {
@@ -95,88 +97,71 @@ def analyze_competitor(input_data: CompetitorInput) -> CompetitorOutput:
             "price": input_data.target_product.get("price", 0),
             "rating_rate": input_data.target_product.get("rating_rate", 0),
             "rating_count": input_data.target_product.get("rating_count", 0),
-            "avg_daily_sales": (input_data.category_sales_data.get(str(target_id), {}).get("avg_daily_sales", 0)
-                                if isinstance(input_data.category_sales_data, dict) else 0),
+            "avg_daily_sales": input_data.target_product.get("avg_daily_sales", 0),
             "category": category,
         }
 
-    # 获取类目商品列表：优先 category_products，降级到模拟数据
-    products = None
-    if input_data.category_products:
-        products = list(input_data.category_products)
-    else:
+    products = list(input_data.category_products) if input_data.category_products else []
+    if not products:
         products = get_feishu_products(category) or get_demo_products(category)
 
-    if not target and products:
-        for p in products:
-            if p["product_id"] == target_id:
-                target = p
-                break
-
     if not target:
-        return CompetitorOutput(
-            target_product_id=target_id,
-            for_display=f"商品ID={target_id}在类目「{category}」中未找到",
-        )
+        t = next((p for p in products if p["product_id"] == target_id), None)
+        if not t:
+            return CompetitorOutput(target_product_id=target_id, target_product_title="?",
+                for_display=f"未找到商品 ID={target_id}")
+        target = {
+            "product_id": t["product_id"], "title": t.get("title", ""),
+            "price": t.get("price", 0), "rating_rate": t.get("rating_rate", 0),
+            "rating_count": t.get("rating_count", 0), "avg_daily_sales": t.get("avg_daily_sales", 0),
+            "category": category,
+        }
 
-    if not products:
-        return CompetitorOutput(
-            target_product_id=target_id,
-            for_display=f"类目「{category}」暂无商品数据",
-        )
+    # ---- 注入爬取表交叉数据 ----
+    crawled_data: list[dict] = []
+    try:
+        from app.services.cross_table import get_all_cross_views
+        cross_views = get_all_cross_views(category)
+        for cv in cross_views:
+            cr = cv.get("crawled")
+            if cr:
+                crawled_data.append({
+                    "sku": cr.get("sku", ""),
+                    "product_name": cr.get("product_name", ""),
+                    "current_price": cr.get("current_price", 0),
+                    "rating": cr.get("rating", 0),
+                    "sales": cr.get("sales", 0),
+                })
+    except Exception as e:
+        logger.warning("竞品分析-爬取数据加载失败: %s", e)
 
-    # 筛选竞品
+    # ---- 竞品对比 ----
     price_lo = target["price"] * 0.5
     price_hi = target["price"] * 1.5
-    competitors_raw = [
-        p for p in products
-        if p["product_id"] != target_id
-        and price_lo <= p["price"] <= price_hi
-    ]
-
+    competitors_raw = [p for p in products if p["product_id"] != target_id and price_lo <= p["price"] <= price_hi]
     if not competitors_raw:
         competitors_raw = [p for p in products if p["product_id"] != target_id]
 
-    if not competitors_raw:
-        return CompetitorOutput(
-            target_product_id=target_id,
-            target_product_title=target["title"],
-            competition_assessment=CompetitionAssessment(
-                overall_score=50, verdict="该商品在同类目中无直接竞品",
-            ),
-            for_display=f"【{target['title'][:30]}】在类目「{category}」中无竞品",
-        )
+    competitors_info = [CompetitorInfo(
+        product_id=c["product_id"], title=c["title"], price=c["price"],
+        rating_rate=c["rating_rate"], rating_count=c["rating_count"],
+        avg_daily_sales=c["avg_daily_sales"],
+    ) for c in competitors_raw]
 
-    # 构建竞品列表
-    competitors_info = []
-    for c in competitors_raw:
-        competitors_info.append(CompetitorInfo(
-            product_id=c["product_id"],
-            title=c["title"],
-            price=c["price"],
-            rating_rate=c["rating_rate"],
-            rating_count=c["rating_count"],
-            avg_daily_sales=c["avg_daily_sales"],
-        ))
-
-    # 计算各维度分数
-    prices = [(c["price"], c["product_id"]) for c in competitors_raw + [target]]
-    ratings = [(c["rating_rate"], c["product_id"]) for c in competitors_raw + [target]]
-    sales = [(c["avg_daily_sales"], c["product_id"]) for c in competitors_raw + [target]]
+    # 打分
+    all_prices = [(c["price"], c["product_id"]) for c in competitors_raw + [target]]
+    all_ratings = [(c["rating_rate"], c["product_id"]) for c in competitors_raw + [target]]
+    all_sales = [(c["avg_daily_sales"], c["product_id"]) for c in competitors_raw + [target]]
 
     tp, tr, ts = target["price"], target["rating_rate"], target["avg_daily_sales"]
-    min_p, max_p = min(p[0] for p in prices), max(p[0] for p in prices)
-    min_r, max_r = min(r[0] for r in ratings), max(r[0] for r in ratings)
-    min_s, max_s = min(s[0] for s in sales), max(s[0] for s in sales)
+    min_p, max_p = min(p[0] for p in all_prices), max(p[0] for p in all_prices)
+    min_r, max_r = min(r[0] for r in all_ratings), max(r[0] for r in all_ratings)
+    min_s, max_s = min(s[0] for s in all_sales), max(s[0] for s in all_sales)
 
     ps = _price_score(tp, min_p, max_p)
     rs = _rating_score(tr, min_r, max_r)
     ss = _sales_score(ts, min_s, max_s)
     overall = round(ps * 0.30 + rs * 0.35 + ss * 0.35, 1)
-
-    price_pos = _position(tp, [(c["price"], c["product_id"]) for c in competitors_raw], reverse=False)
-    rating_pos = _position(tr, [(c["rating_rate"], c["product_id"]) for c in competitors_raw], reverse=True)
-    sales_pos = _position(ts, [(c["avg_daily_sales"], c["product_id"]) for c in competitors_raw], reverse=True)
 
     strengths, weaknesses = [], []
     if ps >= 65: strengths.append("价格有优势")
@@ -185,54 +170,61 @@ def analyze_competitor(input_data: CompetitorInput) -> CompetitorOutput:
     elif rs < 40: weaknesses.append("评分偏低")
     if ss >= 65: strengths.append("销量领先")
     elif ss < 40: weaknesses.append("销量偏低")
-    if target.get("rating_count", 0) > 1000:
-        strengths.append("口碑好（评价数多）")
 
-    if overall >= 80:
-        verdict = "竞争力强，在多个维度上领先竞品"
-    elif overall >= 60:
-        verdict = "竞争力中等，部分维度有优势"
-    elif overall >= 40:
-        verdict = "竞争力一般，需要针对性改进"
-    else:
-        verdict = "竞争力较弱，建议重新评估定价和推广策略"
+    avg_comp_price = sum(c["price"] for c in competitors_raw) / max(len(competitors_raw), 1)
+    avg_comp_rating = sum(c["rating_rate"] for c in competitors_raw) / max(len(competitors_raw), 1)
 
-    avg_competitor_price = sum(c["price"] for c in competitors_raw) / max(len(competitors_raw), 1)
-    price_diff = f"高于竞品均价{abs(tp - avg_competitor_price):.1f}元" if tp > avg_competitor_price else f"低于竞品均价{abs(tp - avg_competitor_price):.1f}元"
-    avg_sales = sum(c["avg_daily_sales"] for c in competitors_raw) / max(len(competitors_raw), 1)
+    # ---- 构建对比表（含爬取数据） ----
+    market_avg_price = sum(c.get("current_price", 0) for c in crawled_data) / max(len(crawled_data), 1)
+    market_avg_rating = sum(c.get("rating", 0) for c in crawled_data) / max(len(crawled_data), 1)
+
+    comparison_table = [{
+        "title": target["title"][:20],
+        "my_price": tp,
+        "market_avg_price": round(market_avg_price, 2) if market_avg_price else None,
+        "comp_avg_price": round(avg_comp_price, 2),
+        "my_rating": tr,
+        "market_avg_rating": round(market_avg_rating, 1) if market_avg_rating else None,
+        "comp_avg_rating": round(avg_comp_rating, 1),
+    }]
+
+    # LLM 差异化分析
+    competitive_edge = _llm_competitive_edge(target["title"], comparison_table)
+
+    price_diff = f"高于竞品均价{abs(tp - avg_comp_price):.1f}元" if tp > avg_comp_price else f"低于竞品均价{abs(tp - avg_comp_price):.1f}元"
+    market_note = f" | 市场均价{market_avg_price:.0f}元" if market_avg_price else ""
 
     display = (
         f"【{target['title'][:30]}】竞争力评分 {overall}/100\n"
-        f"价格定位：{price_pos}（{price_diff}）\n"
-        f"评分定位：{rating_pos}（{tr:.1f}分）\n"
-        f"销量定位：{sales_pos}（日均{ts:.0f}件，竞品平均{avg_sales:.0f}件）\n"
-        f"优势：{'、'.join(strengths) if strengths else '无明显优势'}\n"
-        f"劣势：{'、'.join(weaknesses) if weaknesses else '无明显劣势'}\n"
-        f"综合评语：{verdict}"
+        f"价格定位：{_position(tp, [(c['price'],c['product_id']) for c in competitors_raw], False)}（{price_diff}{market_note}）\n"
+        f"评分定位：{_position(tr, [(c['rating_rate'],c['product_id']) for c in competitors_raw], True)}（{tr:.1f}分，竞品均值{avg_comp_rating:.1f}）\n"
+        f"优势：{', '.join(strengths) if strengths else '无明显优势'}\n"
+        f"劣势：{', '.join(weaknesses) if weaknesses else '无明显劣势'}"
     )
-
-    full_assessment = CompetitionAssessment(
-        price_position=price_pos,
-        rating_position=rating_pos,
-        sales_position=sales_pos,
-        overall_score=overall,
-        verdict=verdict,
-        strengths=strengths,
-        weaknesses=weaknesses,
-    )
+    if competitive_edge:
+        display += f"\n\n差异化：{competitive_edge}"
 
     return CompetitorOutput(
         target_product_id=target_id,
         target_product_title=target["title"],
         competitors=competitors_info,
-        competition_assessment=full_assessment,
+        competition_assessment=CompetitionAssessment(
+            price_position=_position(tp, [(c['price'],c['product_id']) for c in competitors_raw], False),
+            rating_position=_position(tr, [(c['rating_rate'],c['product_id']) for c in competitors_raw], True),
+            sales_position=_position(ts, [(c['avg_daily_sales'],c['product_id']) for c in competitors_raw], True),
+            overall_score=overall,
+            verdict="竞争力强" if overall >= 80 else ("竞争力中等" if overall >= 60 else "需改进"),
+            strengths=strengths, weaknesses=weaknesses,
+        ),
+        comparison_table=comparison_table,
+        competitive_edge=competitive_edge,
         for_downstream={
             "target_product_id": target_id,
             "overall_score": overall,
-            "competitor_avg_price": round(avg_competitor_price, 2),
-            "strengths": strengths,
-            "weaknesses": weaknesses,
+            "competitor_avg_price": round(avg_comp_price, 2),
+            "market_avg_price": round(market_avg_price, 2) if market_avg_price else None,
+            "strengths": strengths, "weaknesses": weaknesses,
+            "competitive_edge": competitive_edge,
         },
         for_display=display,
     )
-

@@ -34,5 +34,8 @@ export const useAnalysisStore = defineStore('analysis', {
         this.categoryStats = res.data?.categories || []
       } catch { this.categoryStats = [] }
     },
+    refreshRecent() {
+      this.recentAnalyses = loadRecent()
+    },
   },
 })

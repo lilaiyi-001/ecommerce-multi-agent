@@ -1,57 +1,15 @@
-"""活动策划智能体（Promotion Plan）
+"""活动策划智能体（Promotion Plan）v0.4
 
 职责：基于选品、定价、库存、用户画像等数据，自动生成促销活动方案。
-纯规则引擎，不依赖 LLM。
-
-飞书权限：不可检索飞书  依赖 LLM：否
+v0.4：LLM驱动为主，规则引擎降级。
 """
 from __future__ import annotations
-from app.utils.llm_client import chat_completion
-import json
+import json, re, logging
 from app.schemas.promotion import PromotionPlanInput, PromotionPlanOutput, PromotionActivity
-
-
-def _llm_design_plan(products: list, pricing: dict, inventory: dict, profile: dict) -> dict:
-    """用 LLM 设计活动方案，失败时用模板"""
-    from app.utils.llm_client import chat_completion
-    try:
-        data = f"商品：{json.dumps(products, ensure_ascii=False)}\n定价：{pricing}\n库存：{inventory}\n用户画像：{profile}"
-        result = chat_completion(
-            "你是一个电商活动策划专家。设计促销活动方案，只返回JSON：{\"type\":\"活动类型\",\"discount\":\"折扣\",\"days\":7,\"reason\":\"理由\"}",
-            data, temperature=0.5, max_tokens=400
-        )
-        import re
-        m = re.search(r"\{.*?\}", result, re.DOTALL)
-        if m:
-            return json.loads(m.group())
-    except Exception:
-        pass
-    return {}
-
-
-def _calc_margin(price: float, cost_ratio: float = 0.6) -> float:
-    return (price - price * cost_ratio) / price * 100 if price > 0 else 0
-
-
-def _estimate_effects(promo_type: str, sensitivity: str, has_clearance: bool) -> tuple[str, str]:
-    """估算活动效果"""
-    if promo_type == "清仓大促":
-        return "预计销量提升60-80%", "预计收入下降5-10%（清仓回笼资金）"
-    elif promo_type == "限时折扣":
-        if sensitivity == "高":
-            return "预计销量提升40-50%", "预计收入增长15-20%"
-        elif sensitivity == "低":
-            return "预计销量提升15-25%", "预计收入增长5-10%"
-        return "预计销量提升30-40%", "预计收入增长10-15%"
-    elif promo_type == "满减优惠":
-        return "预计销量提升20-30%", "预计收入增长8-12%"
-    elif promo_type == "组合促销":
-        return "预计销量提升25-35%", "预计收入增长12-18%"
-    return "预计销量提升20-30%", "预计收入增长10-15%"
+logger = logging.getLogger(__name__)
 
 
 def create_plan(input_data: PromotionPlanInput) -> PromotionPlanOutput:
-    """活动策划主入口"""
     products = input_data.recommended_products
     pricing_info = input_data.pricing_info
     inventory_info = input_data.inventory_info
@@ -60,108 +18,106 @@ def create_plan(input_data: PromotionPlanInput) -> PromotionPlanOutput:
     if not products:
         products = [{"product_id": 0, "title": "默认商品", "current_price": 100}]
 
-    sensitivity = profile.get("price_sensitivity", "中等")
-    strategy = pricing_info.get("strategy_summary", "")
+    sensitivity = profile.get("price_sensitivity", "中等") if isinstance(profile, dict) else "中等"
+    strategy = pricing_info.get("strategy_summary", "") if isinstance(pricing_info, dict) else ""
 
-    # -- 1. 筛选可参与活动的商品（排除库存不足的） --
-    valid_products = []
-    for p in products:
-        stock = p.get("current_stock", 999)
-        if stock <= 0 and p.get("avg_daily_sales", 0) > 0:
-            continue
-        valid_products.append(p)
-
-    if not valid_products:
-        valid_products = products
-
+    valid_products = [p for p in products if p.get("current_stock", 999) > 0]
+    if not valid_products: valid_products = products
     ids = [p.get("product_id", 0) for p in valid_products]
-    titles = [p.get("title", f"商品{pid}")[:12] for pid in ids]
+    titles = [p.get("title", "")[:12] for p in valid_products]
 
-    # -- 2. 判断活动类型 --
-    # 默认值
     promo_type, discount, days = "限时折扣", "8折", 7
+    theme, objective, execution = "", "", ""
 
-    llm_plan = _llm_design_plan(valid_products, pricing_info, inventory_info, profile)
-    if llm_plan.get("type"):
-        promo_type = llm_plan["type"]
-        discount = llm_plan.get("discount", discount)
-        days = llm_plan.get("days", days)
+    # LLM 生成活动方案
+    try:
+        product_list = json.dumps(
+            [{"title": p.get("title",""), "price": p.get("current_price",0)} for p in valid_products[:5]],
+            ensure_ascii=False)
+        prompt_parts = [
+            "请为以下商品设计促销活动方案。",
+            "商品：" + product_list,
+            "定价策略：" + strategy,
+            "库存：" + str(inventory_info),
+            "用户敏感度：" + sensitivity,
+            "",
+            "返回JSON格式数据，包含theme/type/discount/days/objective/execution字段",
+        ]
+        prompt = chr(10).join(prompt_parts)
+        from app.utils.llm_client import chat_completion
+        result = chat_completion("你是电商活动策划专家。只返回JSON。", prompt, temperature=0.5, max_tokens=500)
+        if result:
+            m = re.search(r"\{.*?\}", result, re.DOTALL)
+            if m:
+                d = json.loads(m.group())
+                promo_type = d.get("type", promo_type)
+                discount = d.get("discount", discount)
+                days = d.get("days", days)
+                theme = d.get("theme", "")
+                objective = d.get("objective", "")
+                execution = d.get("execution", "")
+    except Exception as e:
+        logger.warning("LLM活动策划失败: %s", e)
 
-    has_clearance = any(p.get("advice") == "清仓" for p in products) or inventory_info.get("advice") == "清仓"
-    low_margin_count = sum(1 for p in valid_products if _calc_margin(p.get("current_price", 0)) < 20)
-    single_product = len(valid_products) <= 1
-
-    if has_clearance:
-        promo_type, discount, days = "清仓大促", "5折起", 5
-    elif single_product:
-        promo_type, discount, days = "单品促销", "8折", 7
-    else:
-        avg_price = sum(p.get("current_price", 0) for p in valid_products) / max(len(valid_products), 1)
-        if avg_price < 20:
-            promo_type, discount, days = "满减优惠", "满200减30", 7
-        elif sensitivity == "高":
+    # 降级规则引擎
+    if not theme:
+        has_cl = any(p.get("advice") == "清仓" for p in products)
+        single = len(valid_products) <= 1
+        avg_p = sum(p.get("current_price",0) for p in valid_products) / max(len(valid_products),1)
+        if has_cl:
+            promo_type, discount, days = "清仓大促", "5折起", 5
+            theme = "开仓放价·限时清仓"
+            objective = "清库存回笼资金"
+        elif single:
+            promo_type, discount, days = "单品促销", "8折", 7
+            theme = "爆款直降·" + titles[0] + "特惠"
+            objective = "打爆款"
+        elif "高" in str(sensitivity):
             promo_type, discount, days = "限时折扣", "7折", 7
-        elif "溢价" in strategy:
-            promo_type, discount, days = "组合促销", "买2件9折", 14
+            theme = "限时狂欢·错过等一年"
+            objective = "冲销量"
         else:
             promo_type, discount, days = "限时折扣", "8折", 7
+            theme = "品质好物·限时特惠"
+            objective = "提升转化率"
+    if not execution:
+        execution = "预热1天->活动" + str(days-1) + "天->返场1天"
 
-    # -- 3. 策略说明 --
-    strategy_lines = []
-    if has_clearance:
-        strategy_lines.append("部分商品库存较大，以清仓为主快速回笼资金")
-    if single_product:
-        strategy_lines.append("单商品促销，聚焦爆款打造")
-    if low_margin_count > 0:
-        strategy_lines.append(f"其中{low_margin_count}件商品利润空间较小，控制折扣深度")
-    if sensitivity == "高":
-        strategy_lines.append("用户价格敏感度较高，较大折扣可有效刺激转化")
-    elif sensitivity == "低":
-        strategy_lines.append("用户价格敏感度低，活动重点可放在品质宣传")
-    if "溢价" in strategy:
-        strategy_lines.append("商品定位中高端，组合购买有利于提升客单价")
-    if not strategy_lines:
-        strategy_lines.append("综合市场情况制定活动方案")
+    sales_lift = "预计销量提升20-50%"
+    revenue_impact = "预计收入增长10-20%"
+    if "清仓" in promo_type:
+        sales_lift = "预计销量提升50-80%"
+        revenue_impact = "快速回笼资金"
 
-    strategy_text = "；".join(strategy_lines)
-    sales_lift, revenue_impact = _estimate_effects(promo_type, sensitivity, has_clearance)
-
-    # -- 4. 构建输出 --
-    target_desc = "、".join(titles[:3])
-    if len(titles) > 3:
-        target_desc += f"等{len(titles)}款"
-
+    target_desc = titles[0] if len(titles) == 1 else titles[0] + "等" + str(len(titles)) + "款"
     plan = PromotionActivity(
-        type=promo_type,
-        discount=discount,
-        time_frame=f"{days}天",
-        time_frame_days=days,
-        target_products=ids,
+        type=promo_type, discount=discount, time_frame=str(days)+"天",
+        time_frame_days=days, target_products=ids,
         target_products_desc=target_desc,
         estimated_sales_lift=sales_lift,
-        estimated_revenue_impact=revenue_impact,
-    )
+        estimated_revenue_impact=revenue_impact)
 
-    display = (
-        f"📋 活动策划方案\n\n"
-        f"活动类型：{promo_type}\n"
-        f"折扣力度：{discount}\n"
-        f"活动周期：{days}天\n"
-        f"目标商品：{target_desc}\n\n"
-        f"效果预估：\n"
-        f"  \u2022 销量：{sales_lift}\n"
-        f"  \u2022 收入：{revenue_impact}\n\n"
-        f"策略说明：{strategy_text}"
-    )
+    strategy_parts = []
+    if objective: strategy_parts.append("目标："+objective)
+    if theme: strategy_parts.append("主题："+theme)
+    strategy_parts.append("节奏："+execution)
+    strategy_text = "；".join(strategy_parts)
+
+    display_lines = [
+        "活动主题：" + theme,
+        "活动类型：" + promo_type,
+        "折扣力度：" + discount,
+        "活动周期：" + str(days) + "天",
+        "目标商品：" + target_desc,
+        "活动目标：" + objective,
+        "执行节奏：" + execution,
+        "效果：" + sales_lift + " | " + revenue_impact,
+    ]
+    display = chr(10).join(display_lines)
 
     return PromotionPlanOutput(
-        plan=plan,
-        strategy_summary=strategy_text,
-        for_downstream={
-            "promotion_type": promo_type,
-            "discount": discount,
-            "days": days,
-            "target_products": ids,
-        },
-        for_display=display,
-    )
+        plan=plan, strategy_summary=strategy_text,
+        for_downstream={"promotion_type":promo_type,"discount":discount,
+            "days":days,"theme":theme,"objective":objective,
+            "target_products":ids},
+        for_display=display)

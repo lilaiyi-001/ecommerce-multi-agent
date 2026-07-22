@@ -14,6 +14,10 @@ class ProductRank(BaseModel):
     rating_count: int = Field(0, description="评论数")
     avg_daily_sales: float = Field(0.0, description="日均销量（模拟）")
     explosive_index: float = Field(0.0, description="爆款指数（0-100）")
+    # --- 交叉对比指标 ---
+    price_vs_market: Optional[float] = Field(None, description="vs 市场均价差（负=更便宜）")
+    stock_health: str = Field("未知", description="库存健康度：充足/正常/预警/缺货/未知")
+    margin_pct: Optional[float] = Field(None, description="利润率百分比")
 
 
 class SelectionInput(BaseModel):
@@ -30,5 +34,6 @@ class SelectionOutput(BaseModel):
     total_products: int = Field(0, description="该类目商品总数")
     price_distribution: dict = Field(default_factory=dict, description="价格带分布 {min, max, median, bands}")
     ranking: list[ProductRank] = Field(default_factory=list, description="爆款排行榜")
+    cross_summary: str = Field("", description="交叉对比摘要（三表交叉数据概览）")
     for_downstream: dict = Field(default_factory=dict, description="给下游的数据")
     for_display: str = Field("", description="展示文本")

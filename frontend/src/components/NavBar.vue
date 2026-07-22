@@ -7,7 +7,6 @@ const router = useRouter()
 
 const navItems = [
   { path: '/', name: 'Dashboard', icon: '📊', label: '概览' },
-  { path: '/report', name: 'ReportGenerator', icon: '📋', label: '生成报告' },
 ]
 
 function handleLogout() {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Literal
 from pydantic import BaseModel, Field
 
-VALID_ACTIVITY_TYPES = {"double11", "618", "new_product", "clearance", "daily"}
+VALID_ACTIVITY_TYPES = {"double11", "618", "new_product", "clearance", "daily", "flash_sale", "member_day", "festival", "pre_sale", "group_buy", "anniversary", "season_change"}
 
 
 class ReportGenerateInput(BaseModel):

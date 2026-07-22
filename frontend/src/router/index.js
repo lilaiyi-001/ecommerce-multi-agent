@@ -4,7 +4,6 @@ import { isAuthenticated } from '../api/index.js'
 const routes = [
   { path: '/login', name: 'Login', component: () => import('../views/Login.vue'), meta: { public: true } },
   { path: '/', name: 'Dashboard', component: () => import('../views/Dashboard.vue') },
-  { path: '/report', name: 'ReportGenerator', component: () => import('../views/ReportGenerator.vue') },
 ]
 
 const router = createRouter({

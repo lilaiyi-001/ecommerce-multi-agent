@@ -84,4 +84,18 @@ export function chatFollowup(reportId, userMessage, conversationHistory) {
   })
 }
 
+
+// === 报告导出 ===
+export function exportReportDocx(reportId) {
+  return api.get('/reports/' + reportId + '/export', { responseType: 'blob' })
+}
+
+export function exportReportMd(reportId) {
+  return api.get('/reports/' + reportId + '/export/md', { responseType: 'text' })
+}
+
+export function exportReportPdf(reportId) {
+  return api.get('/reports/' + reportId + '/export/pdf', { responseType: 'blob' })
+}
+
 export default api

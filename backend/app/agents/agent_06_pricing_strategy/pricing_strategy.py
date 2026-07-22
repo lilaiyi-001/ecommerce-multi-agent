@@ -57,128 +57,124 @@ def analyze_pricing(input_data: PricingInput) -> PricingOutput:
     # product_id=0（未指定）时自动选择类目下第一个商品
     if input_data.product_id == 0 and not product.get("current_price"):
         from app.services.data_generator import get_demo_products
-        cat = product.get("category", input_data.context.get("category", "electronics") if hasattr(input_data, "context") and input_data.context else "electronics")
-        fallback = get_demo_products(cat)
-        if fallback:
-            input_data.product_id = fallback[0]["product_id"]
-            product = fallback[0]
-            product["current_price"] = product.get("price", product.get("current_price", 0))
+    
+    cat = product.get("category", "electronics")
+    fallback = get_demo_products(cat)
+    if fallback:
+        input_data.product_id = fallback[0]["product_id"]
+        product = fallback[0]
+        product["current_price"] = product.get("price", product.get("current_price", 0))
 
     title = product.get("title", f"商品{input_data.product_id}")
-    price = product.get("current_price") or product.get("price", 0)
-    if price <= 0:
-        return PricingOutput(
-            product_id=input_data.product_id,
-            for_display=f"商品价格异常（{price}），无法进行定价分析",
-        )
-    category = product.get("category", "")
-    cost_ratio = input_data.assumed_cost_ratio
+    price = product.get("current_price", product.get("price", 0))
+    cost = price * input_data.assumed_cost_ratio
+    product_id = input_data.product_id
 
-    competitor_avg = comp_info.get("competitor_avg_price")
-    competitor_score = comp_info.get("overall_score")
-    sensitivity = profile.get("price_sensitivity", "中等")
-    demand_trend = trend_info.get("demand_trend", "平稳")
+    # ---- 交叉数据注入 ----
+    margin_analysis = f"成本{cost:.0f}元/售价{price:.0f}元/毛利率{round((price-cost)/price*100,1) if price>0 else 0}%"
+    max_discount_val = round((price - cost) / price * 100, 1) if price > 0 else 0
+    try:
+        from app.services.cross_table import get_all_cross_views
+        cross_views = get_all_cross_views("")
+        for cv in cross_views:
+            if str(cv.get("product_id", "")) == str(product_id):
+                d = cv.get("derived", {})
+                mp = d.get("margin_pct")
+                if mp is not None:
+                    margin_analysis = f"成本{cost:.0f}元/售价{price:.0f}元/毛利率{mp}%"
+                pvm = d.get("price_vs_market")
+                if pvm is not None:
+                    margin_analysis += f" | vs市场价差{pvm:+.0f}元"
+                break
+    except Exception:
+        pass
 
-    # 1. 成本分析
-    cost = _calc_cost_based(price, cost_ratio)
+    optimal_range = (round(cost * 1.1, 0), round(price * 1.1, 0))
+
+    comp_info = input_data.competitor_info
+    comp_price = (comp_info.get("competitor_avg_price", price * 1.2)
+                  if isinstance(comp_info, dict) else price * 1.2)
+    profile = input_data.user_profile
+    sensitivity = profile.get("price_sensitivity", "\u4e2d\u7b49") if isinstance(profile, dict) else "\u4e2d\u7b49"
+    trend = input_data.trend_info
+    trend_dir = trend.get("trend_direction", "\u5e73\u7a33") if isinstance(trend, dict) else "\u5e73\u7a33"
+
     current_margin = round((price - cost) / price * 100, 1) if price > 0 else 0
-    elasticity = _estimate_elasticity(sensitivity, demand_trend)
-
-    # 2. 计算建议价格
-    sa, ta = _calc_adjustments(sensitivity, demand_trend)
-
-    # 基础价格：成本加成 (1.6 = ~37.5%毛利率)
-    cost_plus = round(cost * 1.6, 2)
-
-    # 竞品参考价
-    if competitor_avg and competitor_avg > 0:
-        competitor_ref = round(competitor_avg, 2)
-        competitor_range_str = f"竞品均价{competitor_avg:.2f}元"
+    if sensitivity and "\u9ad8" in str(sensitivity):
+        strategy = "\u8ddf\u968f\u7b56\u7565" if price > comp_price else "\u6e17\u900f\u7b56\u7565"
+        elasticity = "\u9ad8"
+    elif sensitivity and "\u4f4e" in str(sensitivity):
+        strategy = "\u6ea2\u4ef7\u7b56\u7565"
+        elasticity = "\u4f4e"
     else:
-        competitor_ref = cost_plus
-        competitor_range_str = "无竞品数据（采用成本加成法）"
+        strategy = "\u5747\u8861\u7b56\u7565"
+        elasticity = "\u4e2d"
 
-    # 混合计算: 成本法x0.5 + 竞品法x0.5 + 用户调整 + 趋势调整
-    blended = round(cost_plus * 0.5 + competitor_ref * 0.5 * (1 + sa + ta), 2)
-
-    # 确保不亏本
-    if blended < cost * 1.15:
-        blended = round(cost * 1.15, 2)
-
-    best = blended
-    min_price = round(best * 0.92, 2)
-    max_price = round(best * 1.08, 2)
-
-    # 3. 定价策略
-    if competitor_avg and competitor_avg > 0:
-        ratio = best / competitor_avg
-        if ratio < 0.92:
-            strategy = "走性价比路线，低于竞品平均价"
-            llm_reasoning = _llm_generate_reasoning(product, best, strategy, competitor_avg)
-            reasoning = llm_reasoning if llm_reasoning else f"当前售价{price}元，竞品均价{competitor_avg:.2f}元。建议定价{best}元，以性价比优势抢占市场份额，同时保持{round((best-cost)/best*100,1)}%毛利率。"
-        elif ratio < 1.08:
-            strategy = "跟随市场定价，维持竞争中性"
-            reasoning = f"当前售价{price}元，竞品均价{competitor_avg:.2f}元。建议定价{best}元，与竞品持平，靠产品力和服务差异化竞争。"
-        else:
-            strategy = "略有溢价，突出品质差异化"
-            reasoning = f"当前售价{price}元，竞品均价{competitor_avg:.2f}元。建议定价{best}元，强调品质优势获取溢价，目标用户对价格不敏感。"
+    if trend_dir == "\u4e0a\u5347":
+        best = round(price * 1.05, 0)
+        min_p = round(price * 0.95, 0)
+        max_p = round(price * 1.08, 0)
+    elif trend_dir == "\u4e0b\u964d":
+        best = round(price * 0.93, 0)
+        min_p = round(price * 0.85, 0)
+        max_p = round(price, 0)
     else:
-        strategy = "成本加成法（无竞品数据）"
-        reasoning = f"由于缺少竞品数据，采用成本加成法定价。成本{cost}元，建议定价{best}元，毛利率{round((best-cost)/best*100,1)}%。"
+        best = round(price * 0.98, 0)
+        min_p = round(price * 0.90, 0)
+        max_p = round(price * 1.02, 0)
 
-    # 4. 风险
-    if sensitivity in ("高", "中等"):
-        risk_over = f"若定价超过{max_price}元，预计流失约15%价格敏感用户"
-    else:
-        risk_over = f"若定价超过{max_price}元，可能影响部分价格敏感用户的转化"
+    if best < cost * 1.05:
+        best = round(cost * 1.05, 0)
+    if min_p < cost:
+        min_p = round(cost * 1.01, 0)
+    if max_p > comp_price * 1.5:
+        max_p = round(comp_price * 1.3, 0)
 
-    if best < cost * 1.2:
-        risk_under = f"若定价低于{min_price}元，毛利压缩至{round((min_price-cost)/min_price*100,1)}%，不建议"
-    else:
-        risk_under = "定价空间充裕，有促销弹性"
-
-    # 5. 构建输出
     analysis = {
-        "assumed_cost": cost,
-        "current_margin": f"{current_margin}%",
-        "competitor_range": competitor_range_str,
-        "demand_elasticity_estimate": elasticity,
+        "current_price": price, "assumed_cost": round(cost, 2),
+        "current_margin_pct": current_margin,
+        "competitor_avg_price": round(comp_price, 2),
+        "elasticity": elasticity, "strategy": strategy,
     }
+    reasoning = (
+        f"\u5f53\u524d\u552e\u4ef7{price}\u5143\uff0c\u4f30\u7b97\u6210\u672c{cost:.0f}\u5143\uff0c\u6bdb\u5229\u7387{current_margin}%\u3002"
+        f"\u7528\u6237\u4ef7\u683c\u654f\u611f\u5ea6{elasticity}\uff0c\u7ade\u54c1\u5747\u4ef7{comp_price:.0f}\u5143\uff0c\u8d8b\u52bf{trend_dir}\u3002"
+    )
+    risk_over = f"\u5b9a\u4ef7\u8fc7\u9ad8\u53ef\u80fd\u5bfc\u81f4\u8f6c\u5316\u7387\u4e0b\u964d\uff0c\u7ade\u54c1\u5747\u4ef7\u4ec5{comp_price:.0f}\u5143"
+    risk_under = f"\u5b9a\u4ef7\u8fc7\u4f4e\u4fb5\u8680\u5229\u6da6\u7a7a\u95f4\uff0c\u6210\u672c\u5df2\u8fbe{cost:.0f}\u5143"
 
+    from app.schemas.pricing import PriceRecommendation
     rec = PriceRecommendation(
-        suggested_price_range={"min": min_price, "max": max_price, "best": best},
-        suggested_min=min_price,
-        suggested_max=max_price,
-        suggested_best=best,
-        strategy=strategy,
-        reasoning=reasoning,
-        risk_if_overprice=risk_over,
-        risk_if_underprice=risk_under,
+        suggested_min=min_p, suggested_max=max_p, suggested_best=best,
+        strategy=strategy, reasoning=reasoning,
+        risk_if_overprice=risk_over, risk_if_underprice=risk_under,
     )
 
-    # 展示文本
     display = (
-        f"【{title[:25]}】定价建议\n"
-        f"策略：{strategy}\n"
-        f"推荐售价：{best}元（区间{min_price}~{max_price}元）\n"
-        f"当前售价：{price}元 | 假定成本：{cost}元\n"
-        f"当前毛利率：{current_margin}%\n"
-        f"弹性：{elasticity}\n"
-        f"定价理由：{reasoning[:120]}\n"
-        f"过高风险：{risk_over}\n"
-        f"过低风险：{risk_under}"
+        f"\u3010{title[:25]}\u3011\u5b9a\u4ef7\u5efa\u8bae\n"
+        f"\u7b56\u7565\uff1a{strategy}\n"
+        f"\u63a8\u8350\u552e\u4ef7\uff1a{best}\u5143\uff08\u533a\u95f4{min_p}~{max_p}\u5143\uff09\n"
+        f"\u5f53\u524d\u552e\u4ef7\uff1a{price}\u5143 | \u5047\u5b9a\u6210\u672c\uff1a{cost:.0f}\u5143\n"
+        f"\u5f53\u524d\u6bdb\u5229\u7387\uff1a{current_margin}%\n"
+        f"\u5f39\u6027\uff1a{elasticity}\n"
+        f"\u5b9a\u4ef7\u7406\u7531\uff1a{reasoning[:120]}\n"
+        f"\u8fc7\u9ad8\u98ce\u9669\uff1a{risk_over}\n"
+        f"\u8fc7\u4f4e\u98ce\u9669\uff1a{risk_under}"
     )
 
     return PricingOutput(
         product_id=input_data.product_id,
         pricing_analysis=analysis,
         recommendation=rec,
+        optimal_price_range=optimal_range,
+        max_discount=max_discount_val,
+        margin_analysis=margin_analysis,
         for_downstream={
             "best_price": best,
-            "price_range": [min_price, max_price],
+            "price_range": [min_p, max_p],
             "strategy_summary": strategy,
+            "margin_analysis": margin_analysis,
+            "max_discount": max_discount_val,
         },
         for_display=display,
     )
-
-

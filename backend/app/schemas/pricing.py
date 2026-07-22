@@ -5,8 +5,6 @@ from pydantic import BaseModel, Field
 
 
 class PriceRecommendation(BaseModel):
-    """定价建议"""
-    suggested_price_range: dict = Field(default_factory=dict, description="建议价格区间")
     suggested_min: float = Field(0.0, description="建议最低价")
     suggested_max: float = Field(0.0, description="建议最高价")
     suggested_best: float = Field(0.0, description="建议最优价")
@@ -17,8 +15,7 @@ class PriceRecommendation(BaseModel):
 
 
 class PricingInput(BaseModel):
-    """定价策略输入"""
-    product_id: int = Field(0, description="商品ID (0=自动选择)")
+    product_id: int = Field(0, description="商品ID")
     product: dict = Field(default_factory=dict, description="商品信息")
     competitor_info: dict = Field(default_factory=dict, description="竞品信息")
     trend_info: dict = Field(default_factory=dict, description="趋势信息")
@@ -28,10 +25,13 @@ class PricingInput(BaseModel):
 
 
 class PricingOutput(BaseModel):
-    """定价策略输出"""
     agent_name: str = Field(default="pricing_strategy")
     product_id: int = Field(0, description="商品ID")
     pricing_analysis: dict = Field(default_factory=dict, description="定价分析详情")
-    recommendation: PriceRecommendation = Field(default_factory=PriceRecommendation, description="定价建议")
+    recommendation: PriceRecommendation = Field(default_factory=PriceRecommendation)
+    # --- 交叉对比增强 ---
+    optimal_price_range: tuple[float, float] = Field(default=(0, 0), description="最优价格区间")
+    max_discount: float = Field(0.0, description="最大可承受折扣")
+    margin_analysis: str = Field("", description="利润率分析")
     for_downstream: dict = Field(default_factory=dict, description="给下游数据")
     for_display: str = Field("", description="展示文本")

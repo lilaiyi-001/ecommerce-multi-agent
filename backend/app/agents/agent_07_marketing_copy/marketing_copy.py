@@ -1,231 +1,120 @@
-"""营销文案智能体（Marketing Copy）
+"""营销文案智能体（Marketing Copy）v0.4
 
-职责：基于商品信息和定价策略，生成推广文案。
-核心依赖模板生成 + 质量校验，LLM 增强为可选路径。
-
-飞书权限：不可检索飞书  依赖 LLM：否（模板生成 + 质量校验）
+职责：基于商品交叉对比数据 + 定价策略 + 竞品分析，生成专业营销文案。
+v0.4：删除硬编码模板，完全 LLM 驱动，按类目定制文案风格。
 """
 from __future__ import annotations
-from app.utils.llm_client import chat_completion
-import json
-import re
+import json, re, logging
 from app.schemas.copy import CopyInput, CopyOutput
+from app.utils.llm_client import chat_completion
+logger = logging.getLogger(__name__)
 
-
-# -- 文案模板 ----------------------------------------------------
-TEMPLATES = {
-    "electronics": """🎯 **爆款推荐｜{title}**
-💥 限时特惠，最低仅{price}元！
-⭐ {rating}分 · {reviews}条评价 · 日均{sales}件
-
-🏆 **为什么值得买？**
-• 高评分{rating}分，品质有保障
-• {reviews}位用户真实评价，口碑之选
-• 日均销量{sales}件，热卖爆款
-
-📊 **价格优势**
-定价策略：{strategy_text}
-原价{original_price}元，性价比出众
-竞品均价{competitor_price}元
-
-🔥 **立即行动**
-限时优惠中，错过等一年！
-点击购买，立即拥有！""",
-
-    "clothing": """👗 **时尚推荐｜{title}**
-✨ 限时特价仅{price}元
-⭐ {rating}分 · {reviews}人已购
-
-🎨 **产品亮点**
-• 时尚百搭，品质面料
-• 好评率{rating}分，深受喜爱
-• {reviews}位顾客的选择
-
-💡 **搭配建议**
-{strategy_text}
-原价{original_price}元，性价比之选
-
-🛒 **立即抢购**
-时尚不等人，马上入手！""",
-
-    "jewelry": """💎 **精致之选｜{title}**
-💰 特惠价仅{price}元
-⭐ {rating}分 · {reviews}位顾客信赖
-
-✨ **产品亮点**
-• 精湛工艺，优雅设计
-• {rating}分好评，品质认证
-• {reviews}条真实评价
-
-📦 **购买理由**
-{strategy_text}
-原价{original_price}元
-
-🎁 **限时特惠**
-精致生活，从这一刻开始。""",
-
-    "default": """🎯 **推荐｜{title}**
-💥 仅售{price}元
-⭐ {rating}分 · {reviews}条评价
-
-🏆 **产品亮点**
-• {rating}分好评，品质保障
-• {reviews}位用户推荐
-• 热卖中
-
-💡 **推荐理由**
-{strategy_text}
-原价{original_price}元
-
-🔥 **立即购买**
-机会有限，立即行动！""",
+CATEGORY_STYLE = {
+    "数码": "参数党风格：突出技术参数、性能对比、性价比",
+    "服饰": "场景感风格：突出穿搭场景、面料质感、时尚元素",
+    "食品": "味觉描述风格：突出口感、食材、健康理念",
+    "美妆": "成分党风格：突出成分、功效、肤质适配",
+    "家居": "生活美学风格：突出设计感、实用性、生活品质",
+    "运动": "功能导向风格：突出运动性能、材质科技、使用场景",
+    "文具": "效率风格：突出实用性、设计巧思、办公学习场景",
+    "玩具": "趣味风格：突出可玩性、益智元素、亲子互动",
+    "箱包": "格调风格：突出材质工艺、出行场景、收纳设计",
+    "宠物用品": "暖心风格：突出宠物健康、安全材质、萌宠场景",
+    "园艺": "自然风格：突出绿植养护、家居美化、空气净化",
 }
-
-CATEGORY_MAP = {
-    "electronics": "electronics", "电子": "electronics", "数码": "electronics",
-    "clothing": "clothing", "服装": "clothing", "衣服": "clothing",
-    "jewelry": "jewelry", "珠宝": "jewelry", "首饰": "jewelry",
-}
+DEFAULT_STYLE = "专业电商风格：突出产品核心卖点、数据支撑、行动号召"
 
 
-def _get_template(category: str) -> str:
-    for key in TEMPLATES:
-        if key == "default":
-            continue
-        if category and (category.lower() == key or category.lower() in CATEGORY_MAP):
-            return TEMPLATES[key]
-    return TEMPLATES["default"]
-
-
-def _make_highlights(product: dict, pricing: dict, profile: dict) -> list[str]:
-    """提取卖点列表"""
-    highlights = []
-    price = product.get("current_price", 0)
-    rating = product.get("rating_rate", 0)
-    reviews = product.get("rating_count", 0)
-    sales = product.get("avg_daily_sales", 0)
-
-    if rating >= 4.0:
-        highlights.append(f"{rating}星好评")
-    if reviews > 500:
-        highlights.append(f"{reviews}条评价")
-    if sales > 20:
-        highlights.append(f"日均{sales:.0f}件销量")
-    strategy = pricing.get("strategy_summary", "")
-    if "性价比" in strategy:
-        highlights.append("性价比突出，价格有优势")
-    elif "溢价" in strategy:
-        highlights.append("品质之选，物有所值")
-    tags = profile.get("preference_tags", [])
-    if tags:
-        highlights.append(f"适合{tags[0]}偏好用户")
-
-    return highlights[:5]
-
-
-def _quality_check(copy_text: str, input_data: dict) -> dict:
-    """质量检查：校验文案中的数字是否在输入数据中出现过"""
+def _quality_check(copy_text, input_context):
     numbers = re.findall(r"\d+\.?\d*", copy_text)
-    input_str = str(input_data)
-    ignore = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "100"}
+    ignore = {"0","1","2","3","4","5","6","7","8","9","10","100"}
     issues = []
     for num in numbers:
-        if num in ignore:
-            continue
-        if num not in input_str:
-            issues.append(f"数字{num}未在输入数据中找到")
-    return {
-        "passed": len(issues) == 0,
-        "issues": issues,
-        "numbers_found": len([n for n in numbers if n not in ignore]),
-    }
-
-
-def _get_strategy_text(pricing_info: dict) -> str:
-    strategy = pricing_info.get("strategy_summary", "") or pricing_info.get("strategy", "")
-    if strategy:
-        strategy = strategy.split("，")[0] if "，" in strategy else strategy
-        if "溢价" in strategy:
-            return f"{strategy}，目标用户对品质有要求"
-        elif "性价比" in strategy:
-            return f"{strategy}，适合追求性价比的用户"
-        elif "跟随" in strategy:
-            return f"{strategy}，市场竞争力均衡"
-        else:
-            return strategy
-    return "价格合理，性价比高"
-
-
-def _llm_generate_copy(product: dict, pricing: dict, competitor: dict, profile: dict) -> str:
-    """用 LLM 生成营销文案，失败时用模板"""
-    from app.utils.llm_client import chat_completion
-    try:
-        data = f"商品：{product}\n定价：{pricing}\n竞品：{competitor}\n用户：{profile}"
-        result = chat_completion(
-            "你是一个电商营销文案专家。基于提供的数据生成推广文案，只使用提供的信息，不要编造数据。",
-            data, temperature=0.7, max_tokens=600
-        )
-        return result.strip()
-    except Exception:
-        return ""
+        if num in ignore: continue
+        if num not in input_context:
+            issues.append("数字" + num + "未在输入数据中找到")
+    return {"passed": len(issues)==0, "issues": issues, "numbers_found": len([n for n in numbers if n not in ignore])}
 
 
 def generate_copy(input_data: CopyInput) -> CopyOutput:
-    """营销文案主入口"""
     product = input_data.product
     pricing_info = input_data.pricing_info
     comp_info = input_data.competitor_info
     profile = input_data.user_profile
-
-    title = product.get("title", f"商品{input_data.product_id}")
-    category = product.get("category", "")
-    price = product.get("current_price", 0)
+    title = product.get("title", "商品")
+    price = product.get("current_price", product.get("price", 0))
     rating = product.get("rating_rate", 0)
     reviews = product.get("rating_count", 0)
     sales = product.get("avg_daily_sales", 0)
-    original_price = price
-    best_price = pricing_info.get("best_price", "") or pricing_info.get("suggested_best", "")
-    competitor_price = comp_info.get("competitor_avg_price", "")
+    category = product.get("category", "")
+    style = CATEGORY_STYLE.get(category, DEFAULT_STYLE)
 
-    title_short = title[:20]
-    strategy_text = _get_strategy_text(pricing_info)
+    cross_context = ""
+    try:
+        from app.services.cross_table import get_product_cross_view
+        cv = get_product_cross_view(product)
+        d = cv.get("derived", {})
+        if d:
+            pvm = d.get("price_vs_market")
+            margin = d.get("margin_pct")
+            stock = d.get("stock_health", "?")
+            if pvm is not None:
+                direction = "低于" if pvm < 0 else "高于"
+                cross_context = f"市场对比：{direction}市场均价{abs(pvm):.0f}元 | 毛利率{margin}% | 库存{stock}"
+    except Exception:
+        pass
 
-    # 选择模板
-    template = _get_template(category)
+    pricing_strategy = pricing_info.get("strategy_summary", "") if isinstance(pricing_info, dict) else ""
+    comp_avg = comp_info.get("competitor_avg_price", "") if isinstance(comp_info, dict) else ""
+    sensitivity = profile.get("price_sensitivity", "") if isinstance(profile, dict) else ""
 
-    # 生成文案（LLM 优先，失败时用模板）
-    llm_copy = _llm_generate_copy(product, pricing_info, comp_info, profile)
-    if llm_copy:
-        copy = llm_copy
-    else:
-        copy = template.format(
-            title=title_short,
-            price=price,
-            rating=rating,
-            reviews=reviews,
-            sales=sales,
-            original_price=original_price,
-            best_price=best_price,
-            competitor_price=competitor_price,
-            strategy_text=strategy_text,
-        )
+    prompt_parts = [
+        "请为以下商品撰写专业营销文案。",
+        "",
+        "商品：" + title,
+        "售价：" + str(price) + "元 | 评分：" + str(rating) + "/5 | 评论：" + str(reviews) + " | 日均销量：" + str(sales) + "件",
+        "类目：" + category,
+    ]
+    if cross_context:
+        prompt_parts.append(cross_context)
+    prompt_parts.extend([
+        "定价策略：" + pricing_strategy,
+        "竞品均价：" + str(comp_avg) + "元",
+        "用户敏感度：" + sensitivity,
+        "",
+        "文案风格：" + style,
+        "",
+        "要求：1.痛点引入 2.产品卖点(引用数据) 3.行动号召。禁止编造数字，150字内。",
+    ])
+    prompt = chr(10).join(prompt_parts)
 
-    # 卖点
-    highlights = _make_highlights(product, pricing_info, profile)
+    copy_text = ""
+    try:
+        result = chat_completion(
+            "你是电商营销文案专家，擅长" + style + "。只使用提供的真实数据。",
+            prompt, temperature=0.7, max_tokens=500)
+        copy_text = result.strip() if result else ""
+    except Exception as e:
+        logger.warning("LLM文案失败: %s", e)
 
-    # 质量检查
-    qc = _quality_check(copy, {
-        "product": product, "pricing_info": pricing_info,
-        "competitor_info": comp_info, "user_profile": profile,
-    })
-    if not qc["passed"] and len(qc["issues"]) > 2:
-        copy += "\n\n⚠️ 注意事项：文案中部分数据需人工核实。"
+    if not copy_text or len(copy_text) < 20:
+        copy_text = "【" + title + "】售价仅" + str(price) + "元，" + str(rating) + "分好评，立即下单！"
+
+    input_ctx = str([product, pricing_info, comp_info, profile, cross_context])
+    qc = _quality_check(copy_text, input_ctx)
+
+    highlights = []
+    if rating >= 4.0: highlights.append(str(rating) + "分好评")
+    if reviews > 500: highlights.append(str(reviews) + "条评价")
+    if "低于" in cross_context: highlights.append("价格低于市场均价")
+
+    display = "营销文案\n\n" + copy_text + "\n\n卖点：" + "、".join(highlights)
 
     return CopyOutput(
         product_id=input_data.product_id,
-        copy_text=copy,
+        copy_text=copy_text,
         highlights=highlights,
         quality_check=qc,
-        for_downstream={"copy_text": copy, "highlights": highlights},
-        for_display=f"📝 营销文案\n\n{copy}\n\n💡 卖点：{'、'.join(highlights)}",
+        for_downstream={"copy_text": copy_text, "highlights": highlights},
+        for_display=display,
     )
